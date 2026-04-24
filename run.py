@@ -334,7 +334,7 @@ def main() -> None:
     # ConversationHandler для /generate реализует двухшаговый диалог:
     # 1. Пользователь вводит /generate
     # 2. ConversationHandler подхватывает управление и вызывает generate_entry
-    # 3. Обработчик, который активен в состоянии WAITING_GENERATE - generate_handle
+    # 3. Обработчики, которыы активны в состоянии WAITING_GENERATE - MessageHandler, generate_handle
     generate_conv = ConversationHandler(
         entry_points=[CommandHandler("generate", generate_entry)],
         states={
