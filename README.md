@@ -149,7 +149,9 @@ python run.py
 
 ## Ключевые фрагменты кода
 
-### Паттерн Singleton для языковой модели (llm.py)
+### llm.py
+
+#### Реализация паттерна Singleton
 
 Модель загружается в память один раз и переиспользуется при каждом запросе. `__new__` всегда возвращает один и тот же объект, а флаг `_initialized` защищает от повторной загрузки при повторном вызове конструктора.
 
@@ -166,49 +168,26 @@ def __init__(self, model_path: str = "./Vikhr-Llama-3.2-1B-Instruct") -> None:
     self._initialized = True
 ```
 
-### Семантический поиск в ChromaDB (db.py)
-
-ChromaDB автоматически строит векторные представления (эмбеддинги) текста и ищет документы по смысловой близости, а не по точному совпадению слов. Результат — двойной список: внешний по запросам, внутренний по найденным документам.
-
+#### Загрузка модели и токенизатора
+Загружает локальную модель на GPU или CPU
 ```python
-def select_query(self, text: str) -> str:
-    result = self._collection.query(query_texts=[text], n_results=1)
-    if not result["documents"] or not result["documents"][0]:
-        return ""
-    return f"result: {result['documents'][0][0]}\n"
-```
-
-### Запуск блокирующего кода без остановки бота (run.py)
-
-LLM и ChromaDB — синхронные блокирующие операции. Вызов напрямую из async-кода заморозил бы весь event loop и бот перестал бы реагировать на других пользователей. `run_in_executor` запускает их в отдельном потоке из общего пула, не блокируя event loop.
-
-```python
-loop = asyncio.get_running_loop()
-answer = await asyncio.wait_for(
-    loop.run_in_executor(_executor, llm_client.ask, user_text),
-    timeout=110.0
-)
-```
-
-### Формирование RAG-промпта (run.py)
-
-Перед передачей в модель вопрос пользователя объединяется с найденным контекстом из базы знаний. Если контекст не найден — модель об этом предупреждается и отвечает по своим знаниям.
-
-```python
-def _build_rag_prompt(user_query: str, context: str) -> str:
-    if context:
-        return (
-            f"Контекст из базы знаний:\n{context}\n\n"
-            f"Вопрос пользователя: {user_query}"
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            self._model_path,
+            local_files_only=True
         )
-    return (
-        f"Релевантный контекст не найден.\n\n"
-        f"Вопрос пользователя: {user_query}"
-    )
+
+        self._model = AutoModelForCausalLM.from_pretrained(
+            self._model_path,
+            device_map="auto",       # Автоматическое распределение по устройствам
+            torch_dtype=torch.bfloat16,  #
+            local_files_only=True    # Только локальные файлы
+        )
+
+        # Переводим модель в режим инференса
+        self._model.eval()
 ```
 
-### Инференс языковой модели (llm.py)
-
+#### Инференс языковой модели
 Входной текст форматируется по шаблону модели, токенизируется и передаётся в `generate`. Из результата отрезаются входные токены — остаются только новые, сгенерированные.
 
 ```python
@@ -230,6 +209,63 @@ new_tokens = generated_ids[0][len(model_inputs.input_ids[0]):]
 return self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 ```
 
+### db.py
+
+#### Семантический поиск
+ChromaDB автоматически строит векторные представления (эмбеддинги) текста и ищет документы по смысловой близости, а не по точному совпадению слов
+
+```python
+def select_query(self, text: str) -> str:
+    result = self._collection.query(query_texts=[text], n_results=1)
+    if not result["documents"] or not result["documents"][0]:
+        return ""
+    return f"result: {result['documents'][0][0]}\n"
+```
+
+#### Запись в БД
+Для каждого документа генерируется уникальный ID, затем документ прогоняется через встроенную модель эмбеддингов, преобразующую текст в векторное представление. Результат записывается в БД.
+
+```python
+    def insert_query(self, text: str) -> None:
+        # Генерация ID для каждого документа
+        doc_id = str(uuid.uuid4())
+
+        # Добавление документа в коллекцию
+        self._collection.add(
+            documents=[text],
+            ids=[doc_id]
+        )
+```
+
+
+### run.py
+
+#### Формирование RAG-промпта
+
+Перед передачей в модель вопрос пользователя объединяется с найденным контекстом из базы знаний. Если контекст не найден — модель об этом предупреждается и отвечает по своим знаниям.
+
+```python
+def _build_rag_prompt(user_query: str, context: str) -> str:
+    if context:
+        return (
+            f"Контекст из базы знаний:\n{context}\n\n"
+            f"Вопрос пользователя: {user_query}"
+        )
+    return (
+        f"Релевантный контекст не найден.\n\n"
+        f"Вопрос пользователя: {user_query}"
+    )
+```
+
+#### Запуск блокирующего кода без остановки бота
+LLM и ChromaDB — синхронные блокирующие операции. Вызов напрямую заморозил бы весь event loop и бот перестал бы реагировать на других пользователей. run_in_executor - запуск в отдельном потоке
+```python
+loop = asyncio.get_running_loop()
+answer = await asyncio.wait_for(
+    loop.run_in_executor(_executor, llm_client.ask, user_text),
+    timeout=110.0
+)
+```
 ---
 
 ## Зависимости
