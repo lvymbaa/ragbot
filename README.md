@@ -74,17 +74,17 @@ cd <папка проекта>
 
 **Linux / macOS:**
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
 **Windows:**
 ```bash
-python -m venv venv
-venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate
 ```
 
-После активации в начале строки терминала появится `(venv)` — это означает, что виртуальная среда активна. Все дальнейшие команды выполняются внутри неё.
+После активации в начале строки терминала появится `(.venv)` — это означает, что виртуальная среда активна. Все дальнейшие команды выполняются внутри неё.
 
 Для деактивации (когда закончили работу):
 ```bash
